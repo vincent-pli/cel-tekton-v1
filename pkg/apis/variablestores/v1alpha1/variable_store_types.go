@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/apis"
 
@@ -83,12 +84,15 @@ func (e VariableStoreRunReason) String() string {
 
 // VariableStoreSpec holds the desired state of the VariableStore (from the client).
 type VariableStoreSpec struct {
+	Params []v1beta1.Param `json:"params,omitempty"`
 	// Vars holds the predefined variables and these variabls will be the context for next caculation.
-	Vars []Var `json:"vars,omitempty"`
+	Vars []NameValuePair `json:"vars,omitempty"`
+	// Vars holds the predefined variables and these variabls will be the context for next caculation.
+	Results []NameValuePair `json:"results,omitempty"`
 }
 
 // Var declares an string to use for the var called name.
-type Var struct {
+type NameValuePair struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }
