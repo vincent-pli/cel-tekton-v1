@@ -8,9 +8,5 @@ spec:
     kind: VariableStore
     name: example
   params:
-    - name: job_severity
-      value: "job_priority in ['high', 'normal'] ? 'Sev-1' : 'Sev-2'"
-    - name: types
-      value: "type(job_severity)"
-    - name: alert_enable
-      value: "false" 
+    - name: job-priority
+      value: "medium"

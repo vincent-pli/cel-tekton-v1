@@ -33,8 +33,14 @@ func (vs *VariableStore) Validate(ctx context.Context) *apis.FieldError {
 
 // Validate implements apis.Validatable
 func (vss *VariableStoreSpec) Validate(ctx context.Context) *apis.FieldError {
+	if vss.Params == nil {
+		return apis.ErrMissingField("spec.params")
+	}
 	if vss.Vars == nil {
 		return apis.ErrMissingField("spec.vars")
+	}
+	if vss.Results == nil {
+		return apis.ErrMissingField("spec.results")
 	}
 	return nil
 }

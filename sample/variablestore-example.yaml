@@ -1,11 +1,22 @@
 apiVersion: custom.tekton.dev/v1alpha1
 kind: VariableStore
 metadata:
-  name: example
-  namespace: default
+  name: vars-a56bs
 spec:
+  params:
+    - name: job-priority
+      type: string
   vars:
-  - name: job_priority
-    value: high
-  - name: alert_enable
-    value: "true"
+    - name: job-severity
+      value: >-
+        params.job_priority in ['high', 'normal'] ? 'Sev-1' :
+          (vars.job_severity in ['Sev-1', 'Sev-2'] ? 'Sev-2' : 'Sev-3')
+    - name: alerts-enabled
+      value: >-
+        vars.job_severity != 'Sev-3'
+  results:
+    - name: job-severity
+      value: vars.job_severity
+    - name: job-severity-num
+      value: >-
+        ['Sev-1', 'Sev-2', 'Sev-3'].indexOf(vars.job_severity) + 1

@@ -19,6 +19,7 @@ package variablestore
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/go-multierror"
@@ -54,6 +55,11 @@ type Reconciler struct {
 	// Listers index properties about resources
 	runLister listersalpha.RunLister
 }
+
+const (
+	PrefixParam = "params_"
+	PrefixVar   = "vars_"
+)
 
 // Check that our Reconciler implements Interface
 var _ runreconciler.Interface = (*Reconciler)(nil)
@@ -143,14 +149,79 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
 
 	// If refrenced VariableStore not null, all variables in that will be the context
 	if variablestore != nil {
-		for _, variable := range variablestore.Spec.Vars {
-			contain, _ := containsVar(variable.Name, run.Spec.Params)
-			if contain {
-				continue
+		for _, paramSpec := range variablestore.Spec.Params {
+			param := getParam(paramSpec.Name, run.Spec.Params)
+
+			if param == nil {
+				logger.Errorf("The param: %s defined in VariableStore: %s/%s is not in Run: %s/%s", paramSpec.Name, variablestore.Namespace, variablestore.Name, run.Name, run.Namespace)
+				run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
+					"The param: %s defined in VariableStore: %s/%s is not in Run: %s/%s", paramSpec.Name, variablestore.Namespace, variablestore.Name, run.Name, run.Namespace)
+				return nil
 			}
 
-			contextExpressions[variable.Name] = variable.Value
-			env, err = env.Extend(cel.Declarations(decls.NewVar(variable.Name, decls.Any)))
+			contextExpressions[nameConvert(param.Name, PrefixParam)] = param.Value.StringVal
+			env, err = env.Extend(cel.Declarations(decls.NewVar(nameConvert(param.Name, PrefixParam), decls.Any)))
+			if err != nil {
+				logger.Errorf("CEL expression %s could not be add to context env when reconciling Run %s/%s: %v", param.Name, run.Namespace, run.Name, err)
+				run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
+					"CEL expression %s could not be add to context env", param.Name, err)
+				return nil
+			}
+		}
+	}
+
+	originalVars, err := getVariables()
+	if err != nil {
+		logger.Errorf("Get original variables for VariableStore: %s/%s hit error: %v", variablestore.Name, variablestore.Namespace, err)
+		run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
+			"Get original variables for VariableStore: %s/%s hit error: %v", variablestore.Name, variablestore.Namespace, err)
+		return nil
+	}
+
+	for key, value := range originalVars {
+		contextExpressions[nameConvert(key, PrefixVar)] = value
+		env, err = env.Extend(cel.Declarations(decls.NewVar(nameConvert(key, PrefixVar), decls.Any)))
+		if err != nil {
+			logger.Errorf("CEL expression %s could not be add to context env when reconciling Run %s/%s: %v", key, run.Namespace, run.Name, err)
+			run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
+				"CEL expression %s could not be add to context env", key, err)
+			return nil
+		}
+	}
+
+	for _, variable := range variablestore.Spec.Vars {
+		// Combine the Parse and Check phases CEL program compilation to produce an Ast and associated issues
+		ast, iss := env.Compile(valueConvert(variable.Value.StringVal))
+		if iss.Err() != nil {
+			logger.Errorf("CEL expression %s could not be parsed when reconciling Run %s/%s: %v", variable.Name, run.Namespace, run.Name, iss.Err())
+			run.Status.MarkRunFailed(variablestorev1alpha1.ReasonSyntaxError.String(),
+				"CEL expression %s could not be parsed", variable.Name, iss.Err())
+			return nil
+		}
+
+		// Generate an evaluable instance of the Ast within the environment
+		prg, err := env.Program(ast)
+		if err != nil {
+			logger.Errorf("CEL expression %s could not be evaluated when reconciling Run %s/%s: %v", variable.Name, run.Namespace, run.Name, err)
+			run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
+				"CEL expression %s could not be evaluated", variable.Name, err)
+			return nil
+		}
+
+		// Evaluate the CEL expression (Ast)
+		out, _, err := prg.Eval(contextExpressions)
+		if err != nil {
+			logger.Errorf("CEL expression %s could not be evaluated when reconciling Run %s/%s: %v", variable.Name, run.Namespace, run.Name, err)
+			run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
+				"CEL expression %s could not be evaluated", variable.Name, err)
+			return nil
+		}
+
+		// Evaluation of CEL expression was successful
+		logger.Infof("CEL expression %s evaluated successfully when reconciling Run %s/%s", variable.Name, run.Namespace, run.Name)
+
+		if _, ok := contextExpressions[nameConvert(variable.Name, PrefixVar)]; !ok {
+			env, err = env.Extend(cel.Declarations(decls.NewVar(nameConvert(variable.Name, PrefixVar), decls.Any)))
 			if err != nil {
 				logger.Errorf("CEL expression %s could not be add to context env when reconciling Run %s/%s: %v", variable.Name, run.Namespace, run.Name, err)
 				run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
@@ -158,77 +229,49 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
 				return nil
 			}
 		}
+		contextExpressions[nameConvert(variable.Name, PrefixVar)] = fmt.Sprintf("%s", out.ConvertToType(types.StringType).Value())
+
+		//need record all item in vars, since need to store them to Redis TODO
 	}
 
-	for _, param := range run.Spec.Params {
+	// Handle Result of Run
+	for _, result := range variablestore.Spec.Results {
 		// Combine the Parse and Check phases CEL program compilation to produce an Ast and associated issues
-		ast, iss := env.Compile(param.Value.StringVal)
+		ast, iss := env.Compile(valueConvert(result.Value.StringVal))
 		if iss.Err() != nil {
-			logger.Errorf("CEL expression %s could not be parsed when reconciling Run %s/%s: %v", param.Name, run.Namespace, run.Name, iss.Err())
+			logger.Errorf("CEL expression %s could not be parsed when reconciling Run %s/%s: %v", result.Name, run.Namespace, run.Name, iss.Err())
 			run.Status.MarkRunFailed(variablestorev1alpha1.ReasonSyntaxError.String(),
-				"CEL expression %s could not be parsed", param.Name, iss.Err())
+				"CEL expression %s could not be parsed", result.Name, iss.Err())
 			return nil
 		}
 
 		// Generate an evaluable instance of the Ast within the environment
 		prg, err := env.Program(ast)
 		if err != nil {
-			logger.Errorf("CEL expression %s could not be evaluated when reconciling Run %s/%s: %v", param.Name, run.Namespace, run.Name, err)
+			logger.Errorf("CEL expression %s could not be evaluated when reconciling Run %s/%s: %v", result.Name, run.Namespace, run.Name, err)
 			run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
-				"CEL expression %s could not be evaluated", param.Name, err)
+				"CEL expression %s could not be evaluated", result.Name, err)
 			return nil
 		}
 
 		// Evaluate the CEL expression (Ast)
 		out, _, err := prg.Eval(contextExpressions)
 		if err != nil {
-			logger.Errorf("CEL expression %s could not be evaluated when reconciling Run %s/%s: %v", param.Name, run.Namespace, run.Name, err)
+			logger.Errorf("CEL expression %s could not be evaluated when reconciling Run %s/%s: %v", result.Name, run.Namespace, run.Name, err)
 			run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
-				"CEL expression %s could not be evaluated", param.Name, err)
+				"CEL expression %s could not be evaluated", result.Name, err)
 			return nil
 		}
 
 		// Evaluation of CEL expression was successful
-		logger.Infof("CEL expression %s evaluated successfully when reconciling Run %s/%s", param.Name, run.Namespace, run.Name)
+		logger.Infof("CEL expression %s evaluated successfully when reconciling Run %s/%s", result.Name, run.Namespace, run.Name)
+
 		runResults = append(runResults, v1alpha1.RunResult{
-			Name:  param.Name,
+			Name:  result.Name,
 			Value: fmt.Sprintf("%s", out.ConvertToType(types.StringType).Value()),
 		})
-		contextExpressions[param.Name] = fmt.Sprintf("%s", out.ConvertToType(types.StringType).Value())
-		env, err = env.Extend(cel.Declarations(decls.NewVar(param.Name, decls.Any)))
-		if err != nil {
-			logger.Errorf("CEL expression %s could not be add to context env when reconciling Run %s/%s: %v", param.Name, run.Namespace, run.Name, err)
-			run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
-				"CEL expression %s could not be add to context env", param.Name, err)
-			return nil
-		}
 
-		//Append calculated variables to VariableStore
-		if variablestore != nil {
-			variable := variablestorev1alpha1.Var{
-				Name:  param.Name,
-				Value: fmt.Sprintf("%s", out.ConvertToType(types.StringType).Value()),
-			}
-
-			contain, index := containsParam(param.Name, variablestore.Spec.Vars)
-			if contain {
-				variablestore.Spec.Vars[index] = variable
-			} else {
-				variablestore.Spec.Vars = append(variablestore.Spec.Vars, variable)
-			}
-		}
-
-	}
-
-	// Update VariableStore ??? variablestore do not existed
-	if variablestore != nil {
-		_, err = r.variablestoreClientSet.CustomV1alpha1().VariableStores(run.Namespace).Update(ctx, variablestore, metav1.UpdateOptions{})
-		if err != nil {
-			logger.Errorf("Update VariableStore: %s hit excetion: %v", variablestore.Name, err)
-			run.Status.MarkRunFailed(variablestorev1alpha1.VariableStoreReasonUpdateFaild.String(),
-				"Update VariableStore: %s hit excetion: %v", variablestore.Name, err)
-			return nil
-		}
+		//need record all item in vars, since need to store them to Redis TODO
 	}
 
 	run.Status.Results = append(run.Status.Results, runResults...)
@@ -290,12 +333,32 @@ func containsVar(varName string, params []v1beta1.Param) (bool, int) {
 	return false, -1
 }
 
-func containsParam(paramName string, vars []variablestorev1alpha1.Var) (bool, int) {
-	for index, variable := range vars {
-		if variable.Name == paramName {
-			return true, index
+func getParam(paramName string, params []v1beta1.Param) *v1beta1.Param {
+	for _, param := range params {
+		if paramName == param.Name {
+			return &param
 		}
 	}
 
-	return false, -1
+	return nil
+}
+
+func nameConvert(name, prefix string) string {
+	name = strings.ReplaceAll(name, "-", "_")
+	name = prefix + name
+
+	return name
+}
+
+func valueConvert(value string) string {
+	value = strings.ReplaceAll(value, "params.", PrefixParam)
+	value = strings.ReplaceAll(value, "vars.", PrefixVar)
+
+	return value
+}
+
+func getVariables() (map[string]string, error) {
+	return map[string]string{
+		"job_severity": "Sev-1",
+	}, nil
 }
