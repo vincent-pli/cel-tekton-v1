@@ -1,0 +1,11 @@
+apiVersion: custom.tekton.dev/v1alpha1
+kind: VariableStore
+metadata:
+  name: example
+  namespace: default
+spec:
+  vars:
+  - name: job_priority
+    value: high
+  - name: alert_enable
+    value: "true"
