@@ -38,10 +38,6 @@ type VariableStore struct {
 	// Spec holds the desired state of the VariableStore (from the client).
 	// +optional
 	Spec VariableStoreSpec `json:"spec,omitempty"`
-
-	// Status communicates the observed state of the AddressableService (from the controller).
-	// +optional
-	// Status VariableStoreStatus `json:"status,omitempty"`
 }
 
 var (
@@ -49,19 +45,26 @@ var (
 	_ apis.Validatable   = (*VariableStore)(nil)
 	_ apis.Defaultable   = (*VariableStore)(nil)
 	_ kmeta.OwnerRefable = (*VariableStore)(nil)
-	// // Check that the type conforms to the duck Knative Resource shape.
-	// _ duckv1.KRShaped = (*VariableStore)(nil)
 )
 
 // VariableStoreRunReason represents a reason for the Run "Succeeded" condition
 type VariableStoreRunReason string
 
 const (
-	// VariableStoreReasonCouldntGet indicates that the associated Exception couldn't be retrieved
-	VariableStoreReasonCouldntGet VariableStoreRunReason = "CouldntGet"
+	// ReasonCouldntGet indicates that the associated VariableStore couldn't be retrieved
+	ReasonCouldntGet VariableStoreRunReason = "CouldntGet"
 
-	// ReasonFailedValidation indicates that the reason for failure status is that Run failed runtime validation
-	ReasonFailedValidation VariableStoreRunReason = "RunValidationFailed"
+	// ReasonNoParaminRun indicates that the declared Param cound not find in Run
+	ReasonNoParaminRun VariableStoreRunReason = "CoundntGetParamValue"
+
+	// ReasonCoundntGetOriginalVariables indicates that variables cound not be query from Redis
+	ReasonCoundntGetOriginalVariables VariableStoreRunReason = "CoundntGetOriginalVariables"
+
+	// ReasonCoundntSaveOriginalVariables indicates that variables cound not be save to Redis
+	ReasonCoundntSaveOriginalVariables VariableStoreRunReason = "CoundntSaveOriginalVariables"
+
+	// ReasonCoundntExtendEnv indicates that variables cound not be added to env
+	ReasonCoundntExtendEnv VariableStoreRunReason = "CoundntExtendEnv"
 
 	// ReasonSyntaxError indicates that the reason for failure status is that a CEL expression couldn't be parsed
 	ReasonSyntaxError VariableStoreRunReason = "SyntaxError"
@@ -73,9 +76,6 @@ const (
 	// ReasonEvaluationSuccess indicates that the reason for the success status is that all CEL expressions were
 	// evaluated successfully and the results were produced
 	ReasonEvaluationSuccess VariableStoreRunReason = "EvaluationSuccess"
-
-	// VariableStoreReasonUpdateFaild
-	VariableStoreReasonUpdateFaild VariableStoreRunReason = "UpdateFaild"
 )
 
 func (e VariableStoreRunReason) String() string {
@@ -97,11 +97,6 @@ const (
 	AddressableServiceConditionReady = apis.ConditionReady
 )
 
-// // VariableStoreStatus communicates the observed state of the AddressableService (from the controller).
-// type VariableStoreStatus struct {
-// 	duckv1.Status `json:",inline"`
-// }
-
 // AddressableServiceList is a list of AddressableService resources
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -111,8 +106,3 @@ type VariableStoreList struct {
 
 	Items []VariableStore `json:"items"`
 }
-
-// // GetStatus retrieves the status of the resource. Implements the KRShaped interface.
-// func (vs *VariableStore) GetStatus() *duckv1.Status {
-// 	return &vs.Status.Status
-// }

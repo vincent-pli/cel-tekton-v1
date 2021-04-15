@@ -37,6 +37,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/checker/decls"
 	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/ext"
 
 	"github.com/tektoncd/pipeline/pkg/reconciler/events"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -57,8 +58,6 @@ type Reconciler struct {
 }
 
 const (
-	// PrefixParam = "params_"
-	// PrefixVar   = "vars_"
 	PrefixParam = "params"
 	PrefixVar   = "vars"
 )
@@ -72,7 +71,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, run *v1alpha1.Run) recon
 	logger := logging.FromContext(ctx)
 	logger.Infof("Reconciling Run %s/%s at %v", run.Namespace, run.Name, time.Now())
 
-	// Check that the Run references a Exception CRD.  The logic is controller.go should ensure that only this type of Run
+	// Check that the Run references a VariableStore CRD.  The logic is controller.go should ensure that only this type of Run
 	// is reconciled this controller but it never hurts to do some bullet-proofing.
 	if run.Spec.Ref == nil ||
 		run.Spec.Ref.APIVersion != variablestorev1alpha1.SchemeGroupVersion.String() ||
@@ -126,22 +125,14 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
 	variablestore, err := r.getVariableStore(ctx, run)
 	if err != nil {
 		logger.Errorf("Error retrieving VariableStore for Run %s/%s: %s", run.Namespace, run.Name, err)
-		run.Status.MarkRunFailed(variablestorev1alpha1.VariableStoreReasonCouldntGet.String(),
+		run.Status.MarkRunFailed(variablestorev1alpha1.ReasonCouldntGet.String(),
 			"Error retrieving VariableStore for Run %s/%s: %s",
 			run.Namespace, run.Name, err)
 		return nil
 	}
 
-	if err := validate(run); err != nil {
-		logger.Errorf("Run %s/%s is invalid because of %s", run.Namespace, run.Name, err)
-		run.Status.MarkRunFailed(variablestorev1alpha1.ReasonFailedValidation.String(),
-			"Run can't be run because it has an invalid spec - %v", err)
-		return nil
-	}
-
 	// Create a program environment configured with the standard library of CEL functions and macros
-	env, err := cel.NewEnv(cel.Declarations())
-	// env, err := cel.NewEnv()
+	env, err := cel.NewEnv(cel.Declarations(), ext.Strings(), ext.Encoders())
 	if err != nil {
 		logger.Errorf("Couldn't create a program env with standard library of CEL functions & macros when reconciling Run %s/%s: %v", run.Namespace, run.Name, err)
 		return err
@@ -150,27 +141,19 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
 	var runResults []v1alpha1.RunResult
 	contextExpressions := map[string]interface{}{}
 
-	// If refrenced VariableStore not null, all variables in that will be the context
+	// All variables declared in VariableStore.params will be the add to env
 	var params = map[string]interface{}{}
 	for _, paramSpec := range variablestore.Spec.Params {
 		param := getParam(paramSpec.Name, run.Spec.Params)
 
 		if param == nil {
 			logger.Errorf("The param: %s defined in VariableStore: %s/%s is not in Run: %s/%s", paramSpec.Name, variablestore.Namespace, variablestore.Name, run.Name, run.Namespace)
-			run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
+			run.Status.MarkRunFailed(variablestorev1alpha1.ReasonNoParaminRun.String(),
 				"The param: %s defined in VariableStore: %s/%s is not in Run: %s/%s", paramSpec.Name, variablestore.Namespace, variablestore.Name, run.Name, run.Namespace)
 			return nil
 		}
 
 		params[nameConvert(param.Name)] = param.Value.StringVal
-		// contextExpressions[nameConvert(param.Name, PrefixParam)] = param.Value.StringVal
-		// env, err = env.Extend(cel.Declarations(decls.NewVar(nameConvert(param.Name, PrefixParam), decls.Any)))
-		// if err != nil {
-		// 	logger.Errorf("CEL expression %s could not be add to context env when reconciling Run %s/%s: %v", param.Name, run.Namespace, run.Name, err)
-		// 	run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
-		// 		"CEL expression %s could not be add to context env", param.Name, err)
-		// 	return nil
-		// }
 	}
 
 	if len(params) != 0 {
@@ -178,16 +161,17 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
 		env, err = env.Extend(cel.Declarations(decls.NewVar(PrefixParam, decls.NewMapType(decls.String, decls.Dyn))))
 		if err != nil {
 			logger.Errorf("CEL expression %s could not be add to context env when reconciling Run %s/%s: %v", PrefixParam, run.Namespace, run.Name, err)
-			run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
+			run.Status.MarkRunFailed(variablestorev1alpha1.ReasonCoundntExtendEnv.String(),
 				"CEL expression %s could not be add to context env", PrefixParam, err)
 			return nil
 		}
 	}
 
+	// Get original variables stored in Redis  TODO
 	originalVars, err := getVariables()
 	if err != nil {
 		logger.Errorf("Get original variables for VariableStore: %s/%s hit error: %v", variablestore.Name, variablestore.Namespace, err)
-		run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
+		run.Status.MarkRunFailed(variablestorev1alpha1.ReasonCoundntGetOriginalVariables.String(),
 			"Get original variables for VariableStore: %s/%s hit error: %v", variablestore.Name, variablestore.Namespace, err)
 		return nil
 	}
@@ -195,28 +179,19 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
 	var vars = map[string]interface{}{}
 	for key, value := range originalVars {
 		vars[nameConvert(key)] = value
-		// contextExpressions[nameConvert(key, PrefixVar)] = value
-		// env, err = env.Extend(cel.Declarations(decls.NewVar(nameConvert(key, PrefixVar), decls.Any)))
-		// if err != nil {
-		// 	logger.Errorf("CEL expression %s could not be add to context env when reconciling Run %s/%s: %v", key, run.Namespace, run.Name, err)
-		// 	run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
-		// 		"CEL expression %s could not be add to context env", key, err)
-		// 	return nil
-		// }
 	}
 	contextExpressions[PrefixVar] = vars
-	// contextExpressions[nameConvert(key, PrefixVar)] = value
+
 	env, err = env.Extend(cel.Declarations(decls.NewVar(PrefixVar, decls.NewMapType(decls.String, decls.Dyn))))
 	if err != nil {
 		logger.Errorf("CEL expression %s could not be add to context env when reconciling Run %s/%s: %v", PrefixVar, run.Namespace, run.Name, err)
-		run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
+		run.Status.MarkRunFailed(variablestorev1alpha1.ReasonCoundntExtendEnv.String(),
 			"CEL expression %s could not be add to context env", PrefixVar, err)
 		return nil
 	}
 
 	for _, variable := range variablestore.Spec.Vars {
 		// Combine the Parse and Check phases CEL program compilation to produce an Ast and associated issues
-		// ast, iss := env.Compile(valueConvert(variable.Value.StringVal))
 		ast, iss := env.Compile(variable.Value.StringVal)
 		if iss.Err() != nil {
 			logger.Errorf("CEL expression %s could not be parsed when reconciling Run %s/%s: %v", variable.Name, run.Namespace, run.Name, iss.Err())
@@ -246,29 +221,15 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
 		// Evaluation of CEL expression was successful
 		logger.Infof("CEL expression %s evaluated successfully when reconciling Run %s/%s", variable.Name, run.Namespace, run.Name)
 
-		// if _, ok := contextExpressions[nameConvert(variable.Name, PrefixVar)]; !ok {
-		// 	env, err = env.Extend(cel.Declarations(decls.NewVar(nameConvert(variable.Name, PrefixVar), decls.Any)))
-		// 	if err != nil {
-		// 		logger.Errorf("CEL expression %s could not be add to context env when reconciling Run %s/%s: %v", variable.Name, run.Namespace, run.Name, err)
-		// 		run.Status.MarkRunFailed(variablestorev1alpha1.ReasonEvaluationError.String(),
-		// 			"CEL expression %s could not be add to context env", variable.Name, err)
-		// 		return nil
-		// 	}
-		// }
-		// contextExpressions[nameConvert(variable.Name, PrefixVar)] = fmt.Sprintf("%s", out.ConvertToType(types.StringType).Value())
 		varMap, ok := contextExpressions[PrefixVar].(map[string]interface{})
 		if ok {
 			varMap[nameConvert(variable.Name)] = fmt.Sprintf("%s", out.ConvertToType(types.StringType).Value())
 		}
-		// contextExpressions[PrefixVar][nameConvert(variable.Name)] = fmt.Sprintf("%s", out.ConvertToType(types.StringType).Value())
-
-		//need record all item in vars, since need to store them to Redis TODO
 	}
 
 	// Handle Result of Run
 	for _, result := range variablestore.Spec.Results {
 		// Combine the Parse and Check phases CEL program compilation to produce an Ast and associated issues
-		// ast, iss := env.Compile(valueConvert(result.Value.StringVal))
 		ast, iss := env.Compile(result.Value.StringVal)
 		if iss.Err() != nil {
 			logger.Errorf("CEL expression %s could not be parsed when reconciling Run %s/%s: %v", result.Name, run.Namespace, run.Name, iss.Err())
@@ -303,7 +264,15 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
 			Value: fmt.Sprintf("%s", out.ConvertToType(types.StringType).Value()),
 		})
 
-		//need record all item in vars, since need to store them to Redis TODO
+	}
+
+	//need record all item in vars, since need to store them to Redis TODO
+	err = saveVariables(contextExpressions[PrefixParam])
+	if err != nil {
+		logger.Errorf("Save variables to Redis hit exception when reconciling Run %s/%s: %v", run.Namespace, run.Name, err)
+		run.Status.MarkRunFailed(variablestorev1alpha1.ReasonCoundntSaveOriginalVariables.String(),
+			"Save variables to Redis hit exception when reconciling Run %s/%s: %v", run.Namespace, run.Name, err)
+		return nil
 	}
 
 	run.Status.Results = append(run.Status.Results, runResults...)
@@ -317,52 +286,20 @@ func (r *Reconciler) getVariableStore(ctx context.Context, run *v1alpha1.Run) (*
 	var variablestore *variablestorev1alpha1.VariableStore
 
 	if run.Spec.Ref != nil && run.Spec.Ref.Name != "" {
-		// Use the k8 client to get the TaskLoop rather than the lister.  This avoids a timing issue where
-		// the TaskLoop is not yet in the lister cache if it is created at nearly the same time as the Run.
+		// Use the k8 client to get the VariableStore rather than the lister.  This avoids a timing issue where
+		// the VariableStore is not yet in the lister cache if it is created at nearly the same time as the Run.
 		// See https://github.com/tektoncd/pipeline/issues/2740 for discussion on this issue.
-		//
 		vs, err := r.variablestoreClientSet.CustomV1alpha1().VariableStores(run.Namespace).Get(ctx, run.Spec.Ref.Name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
 
 		variablestore = vs
+	} else {
+		return nil, fmt.Errorf("Missing spec.ref.name for Run %s", fmt.Sprintf("%s/%s", run.Namespace, run.Name))
 	}
 
 	return variablestore, nil
-}
-
-func validate(run *v1alpha1.Run) (errs *apis.FieldError) {
-	errs = errs.Also(validateExpressionsProvided(run))
-	errs = errs.Also(validateExpressionsType(run))
-	return errs
-}
-
-func validateExpressionsProvided(run *v1alpha1.Run) (errs *apis.FieldError) {
-	if len(run.Spec.Params) == 0 {
-		errs = errs.Also(apis.ErrMissingField("params"))
-	}
-	return errs
-}
-
-func validateExpressionsType(run *v1alpha1.Run) (errs *apis.FieldError) {
-	for _, param := range run.Spec.Params {
-		if param.Value.StringVal == "" {
-			errs = errs.Also(apis.ErrInvalidValue(fmt.Sprintf("CEL expression parameter %s must be a string", param.Name),
-				"value").ViaFieldKey("params", param.Name))
-		}
-	}
-	return errs
-}
-
-func containsVar(varName string, params []v1beta1.Param) (bool, int) {
-	for index, param := range params {
-		if param.Name == varName {
-			return true, index
-		}
-	}
-
-	return false, -1
 }
 
 func getParam(paramName string, params []v1beta1.Param) *v1beta1.Param {
@@ -379,22 +316,15 @@ func nameConvert(name string) string {
 	return strings.ReplaceAll(name, "-", "_")
 }
 
-// func nameConvert(name, prefix string) string {
-// 	name = strings.ReplaceAll(name, "-", "_")
-// 	name = prefix + name
-
-// 	return name
-// }
-
-// func valueConvert(value string) string {
-// 	value = strings.ReplaceAll(value, "params.", PrefixParam)
-// 	value = strings.ReplaceAll(value, "vars.", PrefixVar)
-
-// 	return value
-// }
-
+// Fake TODO
 func getVariables() (map[string]string, error) {
 	return map[string]string{
 		"job_severity": "Sev-1",
 	}, nil
+}
+
+// Fake TODO
+func saveVariables(vars interface{}) error {
+
+	return nil
 }
