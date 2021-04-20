@@ -18,6 +18,9 @@ package variablestore
 
 import (
 	"context"
+	"os"
+	"io/ioutil"
+	"strconv"
 
 	"knative.dev/pkg/tracker"
 
@@ -33,6 +36,14 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+const (
+	CAcertPath  = "/etc/redis-client/ca.crt"
+	USERNAME = "USERNAME"
+	PASSWORD = "PASSOWRD"
+	DB = "DB"
+	ADDR = "ADDR"
+)
+
 // NewController creates a Reconciler and returns the result of NewImpl.
 func NewController(
 	ctx context.Context,
@@ -44,9 +55,49 @@ func NewController(
 
 	runInformer := runinformer.Get(ctx)
 
+	//Setup client of Redis
+	caCert, err := ioutil.ReadFile(CAcertPath)
+	if err != nil {
+		logger.Fatalf("Failed to read CA cert for Redis client: %v", err)
+		os.Exit(1)
+	}
+
+	if username, ok := os.LookupEnv(USERNAME); !ok {
+		logger.Fatal("Failed to read USERNAME of Redis from env variables: %v")
+		os.Exit(1)
+	}
+
+	if password, ok := os.LookupEnv(PASSWORD); !ok {
+		logger.Fatal("Failed to read PASSWORD of Redis from env variables: %v")
+		os.Exit(1)
+	}
+
+	if addr, ok := os.LookupEnv(ADDR); !ok {
+		logger.Fatal("Failed to read ADDR of Redis from env variables: %v")
+		os.Exit(1)
+	}
+
+	if db, ok := os.LookupEnv(db); !ok {
+		db = "0"
+	}
+
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     addr,
+		Username: username
+		Password: password,
+		DB:       strconv.Atoi(db),
+		TLSConfig: &tls.Config{
+			RootCAs: caCertPool,
+		},
+	})
+
 	r := &Reconciler{
 		variablestoreClientSet: variablestoreclientset,
 		runLister:              runInformer.Lister(),
+		rdb: rdb,
 	}
 
 	impl := runreconciler.NewImpl(ctx, r)

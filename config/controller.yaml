@@ -42,11 +42,20 @@ spec:
             weight: 100
 
       serviceAccountName: controller
+      volumes:
+      - name: redis-client
+        configMap: 
+          name: redis-client
+          items:
+          - key: ca.crt
       containers:
       - name: controller
         # This is the Go import path for the binary that is containerized
         # and substituted here.
         image: ko://github.com/vincentpli/cel-tekton/cmd/controller
+        volumeMounts:
+        - name: redis-client
+          mountPath: "/etc/redis-client"
         resources:
           requests:
             cpu: 100m
@@ -68,7 +77,26 @@ spec:
           value: config-observability
         - name: METRICS_DOMAIN
           value: knative.dev/samples
-
+        - name: ADDR
+          valueFrom:
+            configMapKeyRef:
+              name: redis-client
+              key: addr
+        - name: USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: redis-client
+              key: username
+        - name: PASSWORD
+          valueFrom:
+            configMapKeyRef:
+              name: redis-client
+              key: password
+        - name: DB
+          valueFrom:
+            configMapKeyRef:
+              name: redis-client
+              key: db
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true

@@ -18,6 +18,7 @@ package variablestore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ import (
 	listersalpha "github.com/tektoncd/pipeline/pkg/client/listers/pipeline/v1alpha1"
 	variablestorev1alpha1 "github.com/vincentpli/cel-tekton/pkg/apis/variablestores/v1alpha1"
 	variableclientset "github.com/vincentpli/cel-tekton/pkg/client/clientset/versioned"
+	"go.uber.org/zap"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/reconciler"
@@ -39,6 +41,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/ext"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/tektoncd/pipeline/pkg/reconciler/events"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -55,6 +58,9 @@ type Reconciler struct {
 
 	// Listers index properties about resources
 	runLister listersalpha.RunLister
+
+	// rdb index properties about resources
+	rdb *redis.Client
 }
 
 const (
@@ -64,6 +70,11 @@ const (
 
 // Check that our Reconciler implements Interface
 var _ runreconciler.Interface = (*Reconciler)(nil)
+
+var redisClient *redis.Client
+
+func init() {
+}
 
 // ReconcileKind implements Interface.ReconcileKind.
 func (r *Reconciler) ReconcileKind(ctx context.Context, run *v1alpha1.Run) reconciler.Event {
@@ -168,7 +179,8 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
 	}
 
 	// Get original variables stored in Redis  TODO
-	originalVars, err := getVariables()
+	redisKey = run.ObjectMeta.Labels["tekton.dev/pipelineRun"]
+	originalVars, err := r.getVariables(redisKey, logger)
 	if err != nil {
 		logger.Errorf("Get original variables for VariableStore: %s/%s hit error: %v", variablestore.Name, variablestore.Namespace, err)
 		run.Status.MarkRunFailed(variablestorev1alpha1.ReasonCoundntGetOriginalVariables.String(),
@@ -267,7 +279,7 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
 	}
 
 	//need record all item in vars, since need to store them to Redis TODO
-	err = saveVariables(contextExpressions[PrefixParam])
+	err = r.saveVariables(redisKey, contextExpressions[PrefixParam])
 	if err != nil {
 		logger.Errorf("Save variables to Redis hit exception when reconciling Run %s/%s: %v", run.Namespace, run.Name, err)
 		run.Status.MarkRunFailed(variablestorev1alpha1.ReasonCoundntSaveOriginalVariables.String(),
@@ -317,14 +329,42 @@ func nameConvert(name string) string {
 }
 
 // Fake TODO
-func getVariables() (map[string]string, error) {
-	return map[string]string{
-		"job_severity": "Sev-1",
-	}, nil
+func (r *Reconciler) getVariables(key string, logger *zap.SugaredLogger) (map[string]string, error) {
+	variables := map[string]string{}
+	val, err := r.rdb.Get(ctx, key).Result()
+	if err == redis.Nil {
+		logger.Infof("There is no variables in redis for pr: %s/%s", run.Namespace, key)
+		return variables
+	} else if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal([]byte(val), &variables)
+	if err != nil {
+		return nil, err
+	}
+
+	return variables
+	// return map[string]string{
+	// 	"job_severity": "Sev-1",
+	// }, nil
 }
 
 // Fake TODO
-func saveVariables(vars interface{}) error {
+func (r *Reconciler) saveVariables(key string, vars interface{}) error {
+	varMap, ok := var.(map[string]string{})
+	if !ok {
+		return fmt.Errorf("Variables is not a map[string]string")
+	}
+	variables, err := json.Marshal(varMap)
+	if err != nil {
+		return err
+	}
 
+    err := r.rdb.Set(context.Background(), key, variables, 0).Err()
+    if err != nil {
+        return err
+    }
+	
 	return nil
 }

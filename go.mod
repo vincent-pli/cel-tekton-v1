@@ -3,6 +3,7 @@ module github.com/vincentpli/cel-tekton
 go 1.15
 
 require (
+	github.com/go-redis/redis/v8 v8.8.2
 	github.com/google/cel-go v0.7.3
 	github.com/hashicorp/go-multierror v1.1.0
 	github.com/tektoncd/pipeline v0.22.0
