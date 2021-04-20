@@ -48,6 +48,7 @@ spec:
           name: redis-client
           items:
           - key: ca.crt
+            path: ca.crt
       containers:
       - name: controller
         # This is the Go import path for the binary that is containerized
