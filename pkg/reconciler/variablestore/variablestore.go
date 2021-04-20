@@ -179,7 +179,7 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
 	}
 
 	// Get original variables stored in Redis  TODO
-	redisKey = run.ObjectMeta.Labels["tekton.dev/pipelineRun"]
+	redisKey := run.ObjectMeta.Labels["tekton.dev/pipelineRun"]
 	originalVars, err := r.getVariables(redisKey, logger)
 	if err != nil {
 		logger.Errorf("Get original variables for VariableStore: %s/%s hit error: %v", variablestore.Name, variablestore.Namespace, err)
@@ -331,10 +331,10 @@ func nameConvert(name string) string {
 // Fake TODO
 func (r *Reconciler) getVariables(key string, logger *zap.SugaredLogger) (map[string]string, error) {
 	variables := map[string]string{}
-	val, err := r.rdb.Get(ctx, key).Result()
+	val, err := r.rdb.Get(context.Background(), key).Result()
 	if err == redis.Nil {
-		logger.Infof("There is no variables in redis for pr: %s/%s", run.Namespace, key)
-		return variables
+		logger.Infof("There is no variables in redis for pr: %s", key)
+		return variables, nil
 	} else if err != nil {
 		return nil, err
 	}
@@ -344,7 +344,7 @@ func (r *Reconciler) getVariables(key string, logger *zap.SugaredLogger) (map[st
 		return nil, err
 	}
 
-	return variables
+	return variables, nil
 	// return map[string]string{
 	// 	"job_severity": "Sev-1",
 	// }, nil
@@ -352,7 +352,8 @@ func (r *Reconciler) getVariables(key string, logger *zap.SugaredLogger) (map[st
 
 // Fake TODO
 func (r *Reconciler) saveVariables(key string, vars interface{}) error {
-	varMap, ok := var.(map[string]string{})
+
+	varMap, ok := vars.(map[string]string)
 	if !ok {
 		return fmt.Errorf("Variables is not a map[string]string")
 	}
@@ -361,10 +362,9 @@ func (r *Reconciler) saveVariables(key string, vars interface{}) error {
 		return err
 	}
 
-    err := r.rdb.Set(context.Background(), key, variables, 0).Err()
-    if err != nil {
-        return err
-    }
-	
+	err = r.rdb.Set(context.Background(), key, variables, 0).Err()
+	if err != nil {
+		return err
+	}
 	return nil
 }

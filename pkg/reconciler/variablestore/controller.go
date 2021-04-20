@@ -18,8 +18,10 @@ package variablestore
 
 import (
 	"context"
-	"os"
+	"crypto/tls"
+	"crypto/x509"
 	"io/ioutil"
+	"os"
 	"strconv"
 
 	"knative.dev/pkg/tracker"
@@ -28,6 +30,7 @@ import (
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
 
+	"github.com/go-redis/redis/v8"
 	runinformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1alpha1/run"
 	runreconciler "github.com/tektoncd/pipeline/pkg/client/injection/reconciler/pipeline/v1alpha1/run"
 	pipelinecontroller "github.com/tektoncd/pipeline/pkg/controller"
@@ -37,11 +40,11 @@ import (
 )
 
 const (
-	CAcertPath  = "/etc/redis-client/ca.crt"
-	USERNAME = "USERNAME"
-	PASSWORD = "PASSOWRD"
-	DB = "DB"
-	ADDR = "ADDR"
+	CAcertPath = "/etc/redis-client/ca.crt"
+	USERNAME   = "USERNAME"
+	PASSWORD   = "PASSOWRD"
+	DB         = "DB"
+	ADDR       = "ADDR"
 )
 
 // NewController creates a Reconciler and returns the result of NewImpl.
@@ -62,33 +65,42 @@ func NewController(
 		os.Exit(1)
 	}
 
-	if username, ok := os.LookupEnv(USERNAME); !ok {
+	username, ok := os.LookupEnv(USERNAME)
+	if !ok {
 		logger.Fatal("Failed to read USERNAME of Redis from env variables: %v")
 		os.Exit(1)
 	}
 
-	if password, ok := os.LookupEnv(PASSWORD); !ok {
+	password, ok := os.LookupEnv(PASSWORD)
+	if !ok {
 		logger.Fatal("Failed to read PASSWORD of Redis from env variables: %v")
 		os.Exit(1)
 	}
 
-	if addr, ok := os.LookupEnv(ADDR); !ok {
+	addr, ok := os.LookupEnv(ADDR)
+	if !ok {
 		logger.Fatal("Failed to read ADDR of Redis from env variables: %v")
 		os.Exit(1)
 	}
 
-	if db, ok := os.LookupEnv(db); !ok {
+	db, ok := os.LookupEnv(DB)
+	if !ok {
 		db = "0"
 	}
 
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM(caCert)
 
+	dbindex, err := strconv.Atoi(db)
+	if err != nil {
+		logger.Fatal("Convert DB to a numeric value hit exception: %v", err)
+		os.Exit(1)
+	}
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     addr,
-		Username: username
+		Username: username,
 		Password: password,
-		DB:       strconv.Atoi(db),
+		DB:       dbindex,
 		TLSConfig: &tls.Config{
 			RootCAs: caCertPool,
 		},
@@ -97,7 +109,7 @@ func NewController(
 	r := &Reconciler{
 		variablestoreClientSet: variablestoreclientset,
 		runLister:              runInformer.Lister(),
-		rdb: rdb,
+		rdb:                    rdb,
 	}
 
 	impl := runreconciler.NewImpl(ctx, r)
