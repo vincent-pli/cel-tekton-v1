@@ -40,6 +40,7 @@ import (
 	"github.com/google/cel-go/checker/decls"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/ext"
+	exts "github.com/vincentpli/cel-tekton/pkg/ext"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/tektoncd/pipeline/pkg/reconciler/events"
@@ -143,7 +144,7 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
 	}
 
 	// Create a program environment configured with the standard library of CEL functions and macros
-	env, err := cel.NewEnv(cel.Declarations(), ext.Strings(), ext.Encoders())
+	env, err := cel.NewEnv(cel.Declarations(), ext.Strings(), ext.Encoders(), exts.Example())
 	if err != nil {
 		logger.Errorf("Couldn't create a program env with standard library of CEL functions & macros when reconciling Run %s/%s: %v", run.Namespace, run.Name, err)
 		return err
