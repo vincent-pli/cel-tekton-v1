@@ -8,7 +8,7 @@ spec:
   ref:
     apiVersion: custom.tekton.dev/v1alpha1
     kind: VariableStore
-    name: example
+    name: example-0
   params:
     - name: job-priority
       value: "medium"

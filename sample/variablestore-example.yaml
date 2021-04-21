@@ -1,7 +1,7 @@
 apiVersion: custom.tekton.dev/v1alpha1
 kind: VariableStore
 metadata:
-  name: vars-a56bs
+  name: example
 spec:
   params:
     - name: job-priority
@@ -19,4 +19,4 @@ spec:
       value: vars.job_severity
     - name: job-severity-num
       value: >-
-        ['Sev-1', 'Sev-2', 'Sev-3'].indexOf(vars.job_severity) + 1
+        "string not array".indexOf(vars.job_severity) + 1

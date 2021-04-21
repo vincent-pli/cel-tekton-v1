@@ -18,7 +18,6 @@ package variablestore
 
 import (
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"io/ioutil"
 	"os"
@@ -42,7 +41,7 @@ import (
 const (
 	CAcertPath = "/etc/redis-client/ca.crt"
 	USERNAME   = "USERNAME"
-	PASSWORD   = "PASSOWRD"
+	PASSWORD   = "PASSWORD"
 	DB         = "DB"
 	ADDR       = "ADDR"
 )
@@ -84,7 +83,7 @@ func NewController(
 	}
 
 	db, ok := os.LookupEnv(DB)
-	if !ok {
+	if !ok || db == "" {
 		db = "0"
 	}
 
@@ -101,9 +100,10 @@ func NewController(
 		Username: username,
 		Password: password,
 		DB:       dbindex,
-		TLSConfig: &tls.Config{
-			RootCAs: caCertPool,
-		},
+		// TLSConfig: &tls.Config{
+		// 	RootCAs: caCertPool,
+		// 	// InsecureSkipVerify: true,
+		// },
 	})
 
 	r := &Reconciler{

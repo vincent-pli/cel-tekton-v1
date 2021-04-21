@@ -279,7 +279,7 @@ func (r *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
 	}
 
 	//need record all item in vars, since need to store them to Redis TODO
-	err = r.saveVariables(redisKey, contextExpressions[PrefixParam])
+	err = r.saveVariables(redisKey, contextExpressions[PrefixVar])
 	if err != nil {
 		logger.Errorf("Save variables to Redis hit exception when reconciling Run %s/%s: %v", run.Namespace, run.Name, err)
 		run.Status.MarkRunFailed(variablestorev1alpha1.ReasonCoundntSaveOriginalVariables.String(),
@@ -353,7 +353,7 @@ func (r *Reconciler) getVariables(key string, logger *zap.SugaredLogger) (map[st
 // Fake TODO
 func (r *Reconciler) saveVariables(key string, vars interface{}) error {
 
-	varMap, ok := vars.(map[string]string)
+	varMap, ok := vars.(map[string]interface{})
 	if !ok {
 		return fmt.Errorf("Variables is not a map[string]string")
 	}

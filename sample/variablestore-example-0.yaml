@@ -1,0 +1,15 @@
+apiVersion: custom.tekton.dev/v1alpha1
+kind: VariableStore
+metadata:
+  name: example-0
+spec:
+  params:
+    - name: job-priority
+      type: string
+  vars:
+    - name: job-severity
+      value: >-
+        params.job_priority in ['high', 'normal'] ? 'Sev-1' : 'Sev-2'
+  results:
+    - name: job-severity
+      value: vars.job_severity
