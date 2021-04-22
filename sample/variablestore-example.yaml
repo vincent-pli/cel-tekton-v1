@@ -19,4 +19,4 @@ spec:
       value: vars.job_severity
     - name: job-severity-num
       value: >-
-        "string not array".indexOf(vars.job_severity) + 1
+        ['Sev-1', 'Sev-2', 'Sev-3'].indexOfa(vars.job_severity) + 1

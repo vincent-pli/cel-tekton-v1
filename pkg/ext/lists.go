@@ -188,7 +188,7 @@ func (exampleLib) CompileOptions() []cel.EnvOption {
 
 	return []cel.EnvOption{
 		cel.Declarations(
-			decls.NewFunction("indexOf",
+			decls.NewFunction("indexOfa",
 				decls.NewInstanceOverload("liststring_index_of_int",
 					[]*exprpb.Type{listString, decls.String},
 					decls.Int)),
@@ -200,7 +200,7 @@ func (exampleLib) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{
 		cel.Functions(
 			&functions.Overload{
-				Operator: "indexOf",
+				Operator: "indexOfa",
 				Binary:   callInListStrStrOutInt(indexOf),
 			},
 		),

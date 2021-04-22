@@ -17,7 +17,20 @@ func callInListStrStrOutInt(fn func([]string, string) (int, error)) functions.Bi
 		if !ok {
 			return types.MaybeNoSuchOverloadErr(arg)
 		}
-		out, err := fn(vVal.Value().([]string), string(argVal))
+		it := vVal.Iterator()
+		i := 0
+		source := []string{}
+		for ; it.HasNext() == types.True; i++ {
+			item := it.Next()
+			vItem, ok := item.(types.String)
+			if !ok {
+				return types.MaybeNoSuchOverloadErr(arg)
+			}
+
+			source = append(source, string(vItem))
+		}
+
+		out, err := fn(source, string(argVal))
 		if err != nil {
 			return types.NewErr(err.Error())
 		}
