@@ -47,7 +47,7 @@ const (
 	PASSWORD   = "PASSWORD"
 	DB         = "DB"
 	ADDR       = "ADDR"
-	MUTEXNAME := "cel-redis-mutex"
+	MUTEXNAME  = "cel-redis-mutex"
 )
 
 // NewController creates a Reconciler and returns the result of NewImpl.
