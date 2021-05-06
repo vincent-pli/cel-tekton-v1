@@ -43,6 +43,7 @@ import (
 	exts "github.com/vincentpli/cel-tekton/pkg/ext"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/go-redsync/redsync/v4"
 	"github.com/tektoncd/pipeline/pkg/reconciler/events"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -62,6 +63,9 @@ type Reconciler struct {
 
 	// rdb index properties about resources
 	rdb *redis.Client
+
+	// mutex for redis
+	mutex redsync.Mutex
 }
 
 const (
@@ -363,9 +367,16 @@ func (r *Reconciler) saveVariables(key string, vars interface{}) error {
 		return err
 	}
 
-	err = r.rdb.Set(context.Background(), key, variables, 0).Err()
+	ctx := context.Background()
+	if err := r.mutex.LockContext(ctx); err != nil {
+		return err
+	}
+	defer mutex.UnlockContext(ctx)
+
+	err = r.rdb.Set(ctx, key, variables, 0).Err()
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
