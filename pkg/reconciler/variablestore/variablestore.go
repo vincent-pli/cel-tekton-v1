@@ -71,6 +71,7 @@ type Reconciler struct {
 const (
 	PrefixParam = "params"
 	PrefixVar   = "vars"
+	PrefixMutex = "mutex-"
 )
 
 // Check that our Reconciler implements Interface
@@ -370,7 +371,7 @@ func (r *Reconciler) saveVariables(key string, vars interface{}) error {
 	ctx := context.Background()
 
 	// Obtain a new mutex by using thename of pr for all instances wanting the same lock.
-	mutex := r.redsync.NewMutex(key)
+	mutex := r.redsync.NewMutex(PrefixMutex + key)
 	if err := mutex.LockContext(ctx); err != nil {
 		return err
 	}
