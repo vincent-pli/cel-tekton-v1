@@ -32,7 +32,7 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/go-redsync/redsync/v4"
 	"github.com/go-redsync/redsync/v4/redis/goredis/v8"
-	
+
 	runinformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1alpha1/run"
 	runreconciler "github.com/tektoncd/pipeline/pkg/client/injection/reconciler/pipeline/v1alpha1/run"
 	pipelinecontroller "github.com/tektoncd/pipeline/pkg/controller"
@@ -113,15 +113,12 @@ func NewController(
 	pool := goredis.NewPool(rdb)
 	// Create an instance of redisync to be used to obtain a mutual exclusion lock.
 	rs := redsync.New(pool)
-	// Obtain a new mutex by using the same name for all instances wanting the
-	// same lock.
-	mutex := rs.NewMutex(MUTEXNAME)
 
 	r := &Reconciler{
 		variablestoreClientSet: variablestoreclientset,
 		runLister:              runInformer.Lister(),
 		rdb:                    rdb,
-		mutex:                  mutex,
+		redsync:                rs,
 	}
 
 	impl := runreconciler.NewImpl(ctx, r)

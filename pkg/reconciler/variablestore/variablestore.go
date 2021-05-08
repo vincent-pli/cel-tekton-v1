@@ -65,7 +65,7 @@ type Reconciler struct {
 	rdb *redis.Client
 
 	// mutex for redis
-	mutex *redsync.Mutex
+	redsync *redsync.Redsync
 }
 
 const (
@@ -368,10 +368,13 @@ func (r *Reconciler) saveVariables(key string, vars interface{}) error {
 	}
 
 	ctx := context.Background()
-	if err := r.mutex.LockContext(ctx); err != nil {
+
+	// Obtain a new mutex by using thename of pr for all instances wanting the same lock.
+	mutex := r.redsync.NewMutex(key)
+	if err := mutex.LockContext(ctx); err != nil {
 		return err
 	}
-	defer r.mutex.UnlockContext(ctx)
+	defer mutex.UnlockContext(ctx)
 
 	err = r.rdb.Set(ctx, key, variables, 0).Err()
 	if err != nil {
